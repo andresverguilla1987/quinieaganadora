@@ -1,0 +1,1 @@
+console.log('frontend loaded'); if(!window.API_BASE) window.API_BASE=''; fetch(window.API_BASE + '/matches').then(r=>r.json()).then(d=>console.log(d)).catch(e=>console.error(e));
