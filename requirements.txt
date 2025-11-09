@@ -6,5 +6,4 @@ numpy
 python-dateutil
 python-dotenv
 scikit-learn
-xgboost
 joblib
