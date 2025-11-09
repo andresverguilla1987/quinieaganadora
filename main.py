@@ -3,16 +3,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import os, pathlib
 
-app = FastAPI(title="Quiniela-AI (rooted)")
+app = FastAPI(title="Quiniela-AI (API_BASE injected)")
 
 # static frontend (dist) placed in ./frontend/dist
 frontend_dist = pathlib.Path(__file__).resolve().parent / "frontend" / "dist"
-if not frontend_dist.exists():
-    print("Warning: frontend dist not found at", str(frontend_dist))
-
 app.mount("/static", StaticFiles(directory=str(frontend_dist)), name="static")
 
-API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+# Injected API_BASE (set at package build time)
+API_BASE = os.getenv("API_BASE", "https://inquisitive-gaufre-199652.netlify.app/")
 
 @app.get("/health")
 def health():
