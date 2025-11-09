@@ -1,0 +1,6 @@
+body{ font-family: Inter, Roboto, Arial; background:#0f1724;color:#e6eef8; margin:0; padding:20px;}
+.container{ max-width:1000px; margin:0 auto;}
+.controls button{ margin-right:8px; padding:8px 12px; border-radius:8px; border:none; background:#06b6d4; color:#022;}
+table{ width:100%; border-collapse:collapse; margin-top:12px;}
+table th, table td{ padding:8px; border-bottom:1px solid rgba(255,255,255,0.06); text-align:left;}
+h1{ color:#9be7ff;}
