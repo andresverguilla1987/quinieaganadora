@@ -1,0 +1,9 @@
+match_id,date,league,home_team,away_team,home_goals,away_goals,odds_home,odds_draw,odds_away
+1,2024-08-10,SP1,Real Madrid,Valencia,2,1,1.75,3.5,4.5
+2,2024-08-11,SP1,Barcelona,Getafe,3,0,1.6,3.8,5.0
+3,2024-08-12,SP1,Atletico,Sevilla,1,1,2.0,3.2,3.9
+4,2024-08-13,SP1,Betis,Villarreal,0,2,2.4,3.1,2.9
+5,2024-08-14,SP1,Osasuna,Real Sociedad,0,0,3.4,3.0,2.0
+6,2024-08-15,SP1,Granada,Alaves,1,2,2.1,3.3,3.6
+7,2024-08-16,SP1,Rayo,Vallecano,2,0,2.5,3.0,2.8
+8,2024-08-17,SP1,Valladolid,Cadiz,0,1,1.9,3.4,4.0

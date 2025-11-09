@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pandas
+scikit-learn
+xgboost
+joblib
+python-dotenv
+requests
+pydantic
+numpy
+python-dateutil
