@@ -1,3 +1,7 @@
-Quiniela AI — Render-ready with API_BASE injected to Netlify URL
+# Quiniela PRO — Source
 
-This package injects window.API_BASE with the Netlify URL you requested. Note: if you intended the frontend to call your backend, you should instead provide the backend URL.
+Frontend SPA minimal.
+
+API_BASE (for netlify): https://quinieaganadora.onrender.com/api
+
+Instructions: Deploy `netlify_frontend` content to Netlify.

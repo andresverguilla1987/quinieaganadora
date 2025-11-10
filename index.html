@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Quiniela PRO</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top"><h1>Quiniela PRO</h1><p class="sub">Predicciones con estadística — apuesta con cabeza</p></header>
+  <main class="wrap">
+    <div class="controls">
+      <button id="refresh">Actualizar partidos</button>
+      <button id="gen">Generar picks</button>
+    </div>
+    <section class="card">
+      <h2>Picks</h2>
+      <div id="picks">Sin datos — presiona Generar picks</div>
+    </section>
+    <section class="card">
+      <h2>Partidos</h2>
+      <ul id="matches"><li>Cargando partidos…</li></ul>
+    </section>
+    <footer class="foot">Hecho con ❤️ — Netlify + Render</footer>
+  </main>
+<script>
+// Embedded API base (preconfigured for Netlify deploy)
+const API_BASE = "https://quinieaganadora.onrender.com/api";
+
+// small helper
+async function api(path){ 
+  const res = await fetch(API_BASE + path);
+  if(!res.ok) throw new Error('status ' + res.status);
+  return res.json();
+}
+
+async function loadMatches(){
+  const el = document.getElementById('matches');
+  el.innerHTML = '<li>Cargando partidos…</li>';
+  try{
+    const data = await api('/matches');
+    if(!Array.isArray(data) || data.length===0){ el.innerHTML = '<li>Sin partidos</li>'; return; }
+    el.innerHTML = data.map(function(m){
+      return '<li><strong>'+ new Date(m.date||m.utc).toLocaleString() +'</strong> — '+ (m.home||'Home') +' vs '+ (m.away||'Away') +' <button data-id="'+(m.id||'')+'" class="det">Detalles</button> <span class="pred">'+(m.prediction||'—')+'</span></li>';
+    }).join('');
+  }catch(err){
+    el.innerHTML = '<li>Error fetching matches ('+err+')</li>';
+    console.error(err);
+  }
+}
+
+async function generatePicks(){
+  const p = document.getElementById('picks');
+  p.innerText = 'Generando picks...';
+  try{
+    const res = await api('/generate-picks');
+    p.innerText = JSON.stringify(res, null, 2);
+  }catch(err){
+    p.innerText = 'Error generando picks: ' + err;
+  }
+}
+
+document.getElementById('refresh').addEventListener('click', loadMatches);
+document.getElementById('gen').addEventListener('click', generatePicks);
+
+window.addEventListener('load', ()=>{ loadMatches(); });
+</script>
+</body>
+</html>
