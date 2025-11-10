@@ -1,7 +1,7 @@
-# Quiniela PRO — Source
+# Quiniela PRO — Fix
 
 Frontend SPA minimal.
 
-API_BASE (for netlify): https://quinieaganadora.onrender.com/api
+API_BASE (for netlify): https://quinieaganadora.onrender.com
 
-Instructions: Deploy `netlify_frontend` content to Netlify.
+Deploy netlify_frontend content to Netlify.

@@ -11,3 +11,4 @@ button{background:var(--accent);border:0;padding:10px 12px;border-radius:8px;col
 #matches li{margin:8px 0}
 .pred{float:right;color:#9beceb}
 .foot{opacity:0.7;margin-top:30px}
+pre#picks{white-space:pre-wrap;background:#031223;padding:10px;border-radius:6px}

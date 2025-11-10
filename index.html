@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Quiniela PRO</title>
+  <title>Quiniela PRO — Fix</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="top"><h1>Quiniela PRO</h1><p class="sub">Predicciones con estadística — apuesta con cabeza</p></header>
+  <header class="top"><h1>Quiniela PRO — Fix</h1><p class="sub">Predicciones con estadística — API_BASE corregida</p></header>
   <main class="wrap">
     <div class="controls">
       <button id="refresh">Actualizar partidos</button>
@@ -15,7 +15,7 @@
     </div>
     <section class="card">
       <h2>Picks</h2>
-      <div id="picks">Sin datos — presiona Generar picks</div>
+      <pre id="picks">Sin datos — presiona Generar picks</pre>
     </section>
     <section class="card">
       <h2>Partidos</h2>
@@ -24,10 +24,8 @@
     <footer class="foot">Hecho con ❤️ — Netlify + Render</footer>
   </main>
 <script>
-// Embedded API base (preconfigured for Netlify deploy)
-const API_BASE = "https://quinieaganadora.onrender.com/api";
+const API_BASE = "https://quinieaganadora.onrender.com";
 
-// small helper
 async function api(path){ 
   const res = await fetch(API_BASE + path);
   if(!res.ok) throw new Error('status ' + res.status);
@@ -41,7 +39,8 @@ async function loadMatches(){
     const data = await api('/matches');
     if(!Array.isArray(data) || data.length===0){ el.innerHTML = '<li>Sin partidos</li>'; return; }
     el.innerHTML = data.map(function(m){
-      return '<li><strong>'+ new Date(m.date||m.utc).toLocaleString() +'</strong> — '+ (m.home||'Home') +' vs '+ (m.away||'Away') +' <button data-id="'+(m.id||'')+'" class="det">Detalles</button> <span class="pred">'+(m.prediction||'—')+'</span></li>';
+      const d = new Date(m.date||m.utc||m.utc_date||Date.now());
+      return '<li><strong>'+ d.toLocaleString() +'</strong> — '+ (m.home||'Home') +' vs '+ (m.away||'Away') +' <button data-id="'+(m.id||'')+'" class="det">Detalles</button> <span class="pred">'+(m.prediction||'—')+'</span></li>';
     }).join('');
   }catch(err){
     el.innerHTML = '<li>Error fetching matches ('+err+')</li>';
@@ -62,7 +61,6 @@ async function generatePicks(){
 
 document.getElementById('refresh').addEventListener('click', loadMatches);
 document.getElementById('gen').addEventListener('click', generatePicks);
-
 window.addEventListener('load', ()=>{ loadMatches(); });
 </script>
 </body>
