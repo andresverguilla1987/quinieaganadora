@@ -1,9 +1,2 @@
 fastapi
-uvicorn[standard]
-requests
-pandas
-numpy
-python-dateutil
-python-dotenv
-scikit-learn
-joblib
+uvicorn
