@@ -1,18 +1,28 @@
+Quiniela PRO - Netlify patch (js/config.js)
+------------------------------------------
 
-# Quiniela PRO - Frontend (fixed API_BASE)
+Contenido del ZIP:
+- js/config.js    -> archivo de parche para detectar API base y exponer window.API_BASE
+- README.md       -> este archivo
 
-Esto es un frontend estático de ejemplo para tu proyecto **Quiniela**.
-He corregido `API_BASE` por defecto para apuntar a tu backend **sin** `/api` al final.
+Instrucciones rápidas para parchear en Netlify:
+1) Descarga este ZIP y descomprímelo.
+2) Si tu build actual tiene una carpeta 'js' en la raíz (por ejemplo build/js/config.js o public/js/config.js),
+   reemplaza el archivo existente por este js/config.js.
+   - Si tu frontend carga config con <script src="/js/config.js" type="module"></script>, entonces funcionará tal cual.
+   - Si tu frontend espera un archivo global (no-module) avísame; te doy una versión sin 'export'.
+3) Sube el contenido parcheado a Netlify (sube ZIP o haz push al repo conectado a Netlify).
+   - Si usas deploy manual, asegúrate de que el path sea exactamente /js/config.js en la raíz del sitio.
+4) Abre la app en el navegador, abre la consola (F12) y busca logs:
+   - [config] variant OK: ...  (si detectó la API)
+   - [config] variant failed: ... (si no detectó ninguna)
+   - window.API_BASE y window.API_DETECTED en consola para comprobar.
+5) Si tu backend responde lento, incrementa TIMEOUT_MS en la parte superior de js/config.js.
 
-## Cómo usar
+Si necesitas:
+- Versión global (no-module) -> responde 'global'
+- Forzar otra PREF_BASE -> responde 'pref: https://mi-backend.example.com'
+- ZIP que incluya un index.html de prueba para validar -> responde 'zip+index'
+- Que suba el ZIP a un repositorio o lo edite dentro del build (puedo crear un ZIP con la estructura exacta que indiques).
 
-- Descomprime `quiniela_netlify_fix.zip` y sube su contenido a Netlify (drag & drop).
-- Si tu backend expone rutas bajo `/api`, edita `config.js` y cambia `API_BASE` añadiendo `/api` al final, por ejemplo `https://quinieaganadora.onrender.com/api`.
-- Si ves errores `Failed to fetch` o `502`, revisa CORS en tu backend; permite peticiones desde el dominio Netlify del sitio.
-
-## Archivos importantes
-- `index.html` - interfaz
-- `styles.css` - estilos
-- `config.js` - apunta `API_BASE`
-- `main.js` - lógica del frontend
-- `_redirects` - para Netlify (sirve index.html para rutas SPA)
+Hecho por el asistente para ayudarte a parchear Netlify rápidamente.
