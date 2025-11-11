@@ -1,120 +1,93 @@
-// config.js
-// Parche inteligente para apuntar al backend (soporta backend en / y en /api)
-// EDITA: si quieres forzar una base concreta, modifica KNOWN_BASE abajo.
-// Ej: const KNOWN_BASE = "https://quinieaganadora.onrender.com";
-const KNOWN_BASE = "https://quinieaganadora.onrender.com"; // <- tu backend (sin /api)
+// js/config.js
+// Parche para detectar la URL correcta del backend (con/sin /api).
+// Reemplaza la URL base preferida en PREF_BASE si quieres forzar una.
+// El script probará varias variantes y dejará la que responda primero.
 
-// Timeout helper para fetch
-function fetchWithTimeout(url, opts = {}, ms = 2500) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), ms);
-    fetch(url, opts)
-      .then((r) => {
-        clearTimeout(timer);
-        resolve(r);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-}
+const PREF_BASE = "https://quinieaganadora.onrender.com"; // <--- Cambia aquí si quieres forzar otra URL
+const TIMEOUT_MS = 2500; // ms para cada prueba (ajusta si tu backend tarda más en responder)
 
-// Probar un endpoint (GET). Devuelve true si status 200-399.
-async function probe(url) {
+// Variantes que probamos (ordenadas por prioridad)
+const VARIANTS = [
+  "",             // https://quinieaganadora.onrender.com
+  "/api",         // https://quinieaganadora.onrender.com/api
+  "/v1",          // por si tu API usa /v1
+  "/api/v1"       // por si usa /api/v1
+];
+
+// Endpoints que consideramos "sanity checks"
+const CHECK_PATHS = [
+  "/health",
+  "/leagues",
+  "/matches"
+];
+
+// utilidad: fetch con timeout y sin romper consola si falla
+async function fetchWithTimeout(url, opts = {}, timeout = TIMEOUT_MS) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetchWithTimeout(url, { method: "GET", mode: "cors" }, 2500);
-    return res.ok || (res.status >= 200 && res.status < 400);
-  } catch (e) {
-    return false;
+    const res = await fetch(url, { ...opts, signal: controller.signal });
+    clearTimeout(id);
+    return res;
+  } catch (err) {
+    clearTimeout(id);
+    return null;
   }
 }
 
-/*
-  Strategy:
-  - Partimos de KNOWN_BASE.
-  - Probamos en orden:
-      1) ${base}/matches
-      2) ${base}/leagues
-      3) ${base}/api/matches
-      4) ${base}/api/leagues
-  - Escogemos la "base eficiente" y exportamos helpers para construir URLs.
-  - Si nada responde, usamos KNOWN_BASE como fallback y la app mostrará errores de "Failed to fetch".
-*/
-let _chosenBase = KNOWN_BASE; // valor final que usarán las funciones
-let _probed = false;         // cache del resultado de probe
+// prueba una variante (base + variant) checando los check_paths
+async function testVariant(base, variant) {
+  const root = `${base.replace(/\/+$/, "")}${variant}`;
+  for (const p of CHECK_PATHS) {
+    const url = `${root}${p.startsWith("/") ? "" : "/"}${p}`;
+    // hacemos un GET y aceptamos 200..399 como OK, también 204
+    const res = await fetchWithTimeout(url, { method: "GET", mode: "cors" });
+    if (res && res.ok) {
+      return { ok: true, base: root };
+    }
+    // si obtenemos 404 seguimos probando otros paths/variants
+    // si res es null (timeout / CORS / network) también seguimos
+  }
+  return { ok: false };
+}
 
-async function ensureProbed() {
-  if (_probed) return _chosenBase;
-  _probed = true;
-
-  const base = KNOWN_BASE.replace(/\/+$/, ""); // quitar slash final
-
-  const tests = [
-    { url: `${base}/matches`, suffix: "" },
-    { url: `${base}/leagues`, suffix: "" },
-    { url: `${base}/api/matches`, suffix: "/api" },
-    { url: `${base}/api/leagues`, suffix: "/api" },
-  ];
-
-  for (const t of tests) {
-    // intentamos GET; algunos endpoints devuelven JSON o 404; probe devuelve true solo si ok
-    const ok = await probe(t.url);
-    if (ok) {
-      // si el endpoint tiene /api en la URL, setear base sin /api porque usaremos `apiPrefix`
-      if (t.suffix === "/api") {
-        // t.url === base + '/api/xxx' -> guardamos base sin /api y apiPrefix='/api'
-        _chosenBase = base; // base sin /api
-        _apiPrefix = "/api";
-      } else {
-        _chosenBase = base;
-        _apiPrefix = "";
-      }
-      return _chosenBase;
+// función principal: detecta y seta window.API_BASE
+async function detectApiBase() {
+  // 1) si PREF_BASE ya funciona con alguna variante, úsala (prueba variantes)
+  for (const v of VARIANTS) {
+    const candidate = `${PREF_BASE.replace(/\/+$/, "")}${v}`;
+    const r = await testVariant(PREF_BASE, v);
+    if (r.ok) {
+      window.API_BASE = r.base;
+      return window.API_BASE;
     }
   }
 
-  // Si llegamos aquí, no probó. Dejamos base como KNOWN_BASE y apiPrefix vacío.
-  _chosenBase = base;
-  _apiPrefix = "";
-  return _chosenBase;
+  // 2) si PREF_BASE falló, probamos las variantes sobre https://<hostname> (same origin)
+  const origin = window.location.origin;
+  for (const v of VARIANTS) {
+    const r = await testVariant(origin, v);
+    if (r.ok) {
+      window.API_BASE = r.base;
+      return window.API_BASE;
+    }
+  }
+
+  // 3) fallback: dejar PREF_BASE (aunque no responda) para que el diagnóstico lo muestre
+  window.API_BASE = PREF_BASE;
+  return window.API_BASE;
 }
 
-// apiPrefix: "" o "/api". Lo inicializamos con null y lo establecerá ensureProbed
-let _apiPrefix = null;
+// Export/preparar: iniciamos la detección inmediatamente y dejamos una promesa utilizable.
+const apiReady = detectApiBase(); // promesa que resuelve la base detectada
 
-// Función pública para obtener la base (asegura probe)
-async function getApiConfig() {
-  await ensureProbed();
-  return { base: _chosenBase, apiPrefix: _apiPrefix || "" };
-}
+// También exportamos helpers para que el resto de la app los use
+export { apiReady, fetchWithTimeout };
 
-// Helper para construir rutas completas (ej: getApiUrl("/matches"))
-async function getApiUrl(path = "") {
-  await ensureProbed();
-  const prefix = _apiPrefix || "";
-  // normaliza path
-  const p = path.replace(/^\/+/, "");
-  return `${_chosenBase}${prefix}/${p}`;
-}
+// Nota: la app principal puede hacer:
+// import { apiReady } from './js/config.js';
+// await apiReady; // esperar detección
+// fetch(window.API_BASE + '/matches') ...
+//
+// Si prefieres forzar manualmente la URL, cambia PREF_BASE arriba y sube el archivo.
 
-// Síncrono (no probado): construye URL asumiendo apiPrefix determinado
-function buildUrlAssuming(path = "", assumeApi = "") {
-  const base = KNOWN_BASE.replace(/\/+$/, "");
-  const prefix = assumeApi === "/api" ? "/api" : "";
-  const p = path.replace(/^\/+/, "");
-  return `${base}${prefix}/${p}`;
-}
-
-/* Exports:
-   - getApiConfig() => { base, apiPrefix }  (async)
-   - getApiUrl(path) => string (async)
-   - buildUrlAssuming(path, assumeApi) => string (sync, for debugging)
-   - KNOWN_BASE (const)
-*/
-export {
-  KNOWN_BASE,
-  getApiConfig,
-  getApiUrl,
-  buildUrlAssuming,
-};
