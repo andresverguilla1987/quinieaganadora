@@ -1,178 +1,214 @@
-// server.js - Quiniela PRO minimal backend (placeholder data + external API hooks)
+// server.js - Quiniela backend (Football-Data.org integration)
+// Requires: FOOTBALL_DATA_KEY in env
+// Installs: npm i express node-fetch@2 cors
 const express = require('express');
 const fetch = require('node-fetch');
 const cors = require('cors');
 const app = express();
 app.use(express.json());
-// Allow all origins for convenience - in production tighten this.
 app.use(cors());
 
-// Simple in-memory store for demo (matches, leagues, predictions)
-let LEAGUES = [
-  { id: 'liga_mx', name: 'Liga MX' },
-  { id: 'epl', name: 'Premier League' },
-  { id: 'laliga', name: 'LaLiga' }
-];
+const FOOTBALL_KEY = process.env.FOOTBALL_DATA_KEY || null;
+const API_ROOT = 'https://api.football-data.org/v4';
+// Simple in-memory cache
+const CACHE = { leagues: null, competitions_ts: 0, fixtures: {}, teams: {}, standings: {} };
+const CACHE_TTL = 1000 * 60 * 5; // 5 minutes
 
-// example matches (id, league, teams, date, optional ratings)
-let MATCHES = [
-  { id: 1, league: 'liga_mx', team_a: 'América', team_b: 'Chivas', match_date: new Date(Date.now()+3600*1000).toISOString(), team_a_rating:1500, team_b_rating:1480, home: 'A' },
-  { id: 2, league: 'epl', team_a: 'Manchester City', team_b: 'Arsenal', match_date: new Date(Date.now()+7200*1000).toISOString(), team_a_rating:1750, team_b_rating:1700, home: 'A' },
-  { id: 3, league: 'laliga', team_a: 'Real Madrid', team_b: 'Barcelona', match_date: new Date(Date.now()+10800*1000).toISOString(), team_a_rating:1760, team_b_rating:1755, home: 'A' }
-];
-
-// Simple predictions store
-let PREDICTIONS = []; // {user, match_id, prediction, points}
-
-// Helpers: convert odds to implied probs (expects decimal odds {home, draw, away})
-function oddsToImplied(odds) {
-  if(!odds || !odds.home) return null;
-  const inv = { home: 1/odds.home, draw: 1/odds.draw, away: 1/odds.away };
-  const s = inv.home + inv.draw + inv.away;
-  return { home: inv.home/s, draw: inv.draw/s, away: inv.away/s };
+function headers() {
+  const h = { 'X-Auth-Token': FOOTBALL_KEY };
+  return h;
 }
 
-// Simple Elo -> Poisson model utilities
-function eloExpected(rA, rB) {
-  return 1 / (1 + Math.pow(10, (rB - rA) / 400));
-}
-function expectedGoalsFromElo(rA, rB, homeAdv = 0) {
-  const expA = eloExpected(rA + homeAdv, rB);
-  const base = 1.2;
-  const scale = 1.8;
-  const lambdaA = Math.max(0.1, base + (expA - 0.5) * scale + (homeAdv>0?0.25:0));
-  const lambdaB = Math.max(0.05, base - (expA - 0.5) * scale);
-  return { lambdaA, lambdaB };
-}
-function samplePoisson(lambda) {
-  const L = Math.exp(-lambda);
-  let k = 0;
-  let p = 1;
-  while (p > L) {
-    k++;
-    p *= Math.random();
+async function fetchFootball(path) {
+  if (!FOOTBALL_KEY) throw new Error('FOOTBALL_DATA_KEY not set');
+  const url = API_ROOT + path;
+  const r = await fetch(url, { headers: headers() });
+  if (!r.ok) {
+    const txt = await r.text();
+    const e = new Error('Fetch failed ' + r.status + ' ' + txt);
+    e.status = r.status;
+    throw e;
   }
-  return k - 1;
-}
-function simulateMatch(lambdaA, lambdaB, sims = 2000) {
-  let winsA = 0, winsB = 0, draws = 0;
-  const scoreCounts = {};
-  for (let i=0;i<sims;i++) {
-    const gA = samplePoisson(lambdaA);
-    const gB = samplePoisson(lambdaB);
-    if (gA > gB) winsA++;
-    else if (gB > gA) winsB++;
-    else draws++;
-    const key = `${gA}-${gB}`;
-    scoreCounts[key] = (scoreCounts[key] || 0) + 1;
-  }
-  return {
-    pA: winsA / sims,
-    pDraw: draws / sims,
-    pB: winsB / sims,
-    topScores: Object.entries(scoreCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([score,count])=>({score,prob:count/sims}))
-  };
+  return r.json();
 }
 
-// Routes
-app.get('/api/leagues', (req,res) => {
-  return res.json({ leagues: LEAGUES });
+// GET /api/leagues -> list competitions (filtered common ones)
+app.get('/api/leagues', async (req, res) => {
+  try {
+    // cache check
+    if (CACHE.leagues && (Date.now() - CACHE.competitions_ts) < CACHE_TTL) {
+      return res.json({ leagues: CACHE.leagues, cached: true });
+    }
+    const j = await fetchFootball('/competitions');
+    // j.competitions array
+    // keep only top-tier competitions by plan: filter by area or by known ids
+    const keep = j.competitions.filter(c => ['PL','CL','PD','SA','BL1','PD','DED','FL1','FL2','PPL','MSL','CL','EL'].includes(c.code) || c.area && ['England','Spain','Italy','Germany','France','Mexico'].includes(c.area.name));
+    const compact = keep.map(c => ({ id: c.id, code: c.code, name: c.name, area: c.area && c.area.name }));
+    CACHE.leagues = compact;
+    CACHE.competitions_ts = Date.now();
+    return res.json({ leagues: compact, cached: false });
+  } catch (err) {
+    console.error('leagues err', err);
+    return res.status(500).json({ error: String(err) });
+  }
 });
 
-app.get('/api/fixtures', (req,res) => {
-  const league = req.query.league;
-  const date = req.query.date; // optional
-  let items = MATCHES;
-  if (league) items = items.filter(m=>m.league===league);
-  if (date) items = items.filter(m => m.match_date.startsWith(date));
-  return res.json({ fixtures: items });
+// GET /api/fixtures?competition={id}
+app.get('/api/fixtures', async (req,res) => {
+  const comp = req.query.competition || req.query.league;
+  try {
+    if (!comp) {
+      // fallback: return a small list of upcoming matches across default competitions
+      // try /matches endpoint (returns across competitions)
+      const all = await fetchFootball('/matches?status=SCHEDULED&limit=50');
+      return res.json({ fixtures: all.matches || [] });
+    }
+    // cache per comp
+    if (CACHE.fixtures[comp] && (Date.now() - CACHE.fixtures[comp].ts) < CACHE_TTL) {
+      return res.json({ fixtures: CACHE.fixtures[comp].data, cached: true });
+    }
+    const j = await fetchFootball(`/competitions/${comp}/matches?status=SCHEDULED`);
+    const m = j.matches || [];
+    CACHE.fixtures[comp] = { ts: Date.now(), data: m };
+    return res.json({ fixtures: m, cached: false });
+  } catch (err) {
+    console.error('fixtures err', err);
+    return res.status(err.status || 500).json({ error: String(err) });
+  }
 });
 
-app.get('/api/match/:id', (req,res) => {
+// GET /api/team/:id -> team info
+app.get('/api/team/:id', async (req,res) => {
+  const id = req.params.id;
+  try {
+    if (CACHE.teams[id]) return res.json({ team: CACHE.teams[id], cached: true });
+    const j = await fetchFootball(`/teams/${id}`);
+    CACHE.teams[id] = j;
+    return res.json({ team: j });
+  } catch (err) {
+    console.error('team err', err);
+    return res.status(err.status || 500).json({ error: String(err) });
+  }
+});
+
+// GET /api/standings?competition={id} -> returns standings with goals for/against (used to compute strengths)
+app.get('/api/standings', async (req,res) => {
+  const comp = req.query.competition;
+  try {
+    if (!comp) return res.status(400).json({ error: 'missing competition' });
+    if (CACHE.standings[comp] && (Date.now() - CACHE.standings[comp].ts) < CACHE_TTL) {
+      return res.json({ standings: CACHE.standings[comp].data, cached: true });
+    }
+    const j = await fetchFootball(`/competitions/${comp}/standings`);
+    // pick the table for the standings (type TOTAL)
+    let table = [];
+    if (j && j.standings) {
+      const s = j.standings.find(x => x.type === 'TOTAL') || j.standings[0];
+      table = s ? (s.table || []) : [];
+    }
+    CACHE.standings[comp] = { ts: Date.now(), data: table };
+    return res.json({ standings: table });
+  } catch (err) {
+    console.error('standings err', err);
+    return res.status(err.status || 500).json({ error: String(err) });
+  }
+});
+
+// Helper: estimate attack/defense strength from standings table row
+function estimateStrengthsFromTable(table) {
+  // table items have: team {id,name}, playedGames, goalsFor, goalsAgainst
+  // compute average goals for and against per team and derive multiplier strengths
+  const N = table.length || 1;
+  let totalGF = 0, totalGA = 0;
+  table.forEach(r => { totalGF += (r.goalsFor || 0); totalGA += (r.goalsAgainst || 0); });
+  const avgGF = totalGF / N;
+  const avgGA = totalGA / N;
+  const strengths = {};
+  table.forEach(r => {
+    const teamId = r.team && r.team.id;
+    const atk = ((r.goalsFor || 0) / (r.playedGames || 1)) / (avgGF || 1);
+    const def = ((r.goalsAgainst || 0) / (r.playedGames || 1)) / (avgGA || 1);
+    strengths[teamId] = { attack: atk, defense: def, teamName: r.team && r.team.name };
+  });
+  return strengths;
+}
+
+// GET /api/match/:id -> fetch match detail (from /matches endpoint)
+app.get('/api/match/:id', async (req,res) => {
   const id = Number(req.params.id);
-  const match = MATCHES.find(m=>m.id===id);
-  if(!match) return res.status(404).json({ error: 'not found' });
-  // placeholder details: events empty, lineups empty
-  return res.json({ match, events: [], lineups: {} });
+  try {
+    // football-data doesn't provide a direct /matches/{id} in all cases; use /matches?matchIds=
+    const j = await fetchFootball(`/matches/${id}`);
+    // Some responses return { match: ... }
+    if (j && j.match) return res.json({ match: j.match });
+    // fallback: search scheduled matches
+    const all = await fetchFootball('/matches?limit=500');
+    const match = (all.matches || []).find(m => Number(m.id) === id);
+    if (!match) return res.status(404).json({ error: 'not found' });
+    return res.json({ match });
+  } catch (err) {
+    console.error('match err', err);
+    return res.status(err.status || 500).json({ error: String(err) });
+  }
 });
 
-// Probabilities endpoint: returns odds-based and model-based probabilities
+// GET /api/match/:id/probabilities -> compute probabilities using standings-based strengths + Poisson MC
 app.get('/api/match/:id/probabilities', async (req,res) => {
   const id = Number(req.params.id);
-  const match = MATCHES.find(m=>m.id===id);
-  if(!match) return res.status(404).json({ error: 'not found' });
-
-  // Try to fetch odds from a third-party if API key provided (placeholder)
-  let odds = null;
-  const ODDS_API_KEY = process.env.ODDS_API_KEY || null;
-  if (ODDS_API_KEY) {
-    try {
-      // Example: The Odds API (this is illustrative; adjust per provider)
-      // const oddsResp = await fetch(`https://api.the-odds-api.com/v4/sports/soccer_epl/odds/?regions=eu&markets=h2h&oddsFormat=decimal&apiKey=${ODDS_API_KEY}`);
-      // const oddsJson = await oddsResp.json();
-      // parse provider response to find match odds...
-    } catch (err) {
-      console.warn('odds fetch failed', err);
+  try {
+    const jm = await fetchFootball(`/matches/${id}`);
+    const match = jm && jm.match ? jm.match : null;
+    if (!match) return res.status(404).json({ error: 'match not found' });
+    const compId = match.competition && match.competition.id;
+    // get standings for competition to estimate strengths
+    const st = await fetchFootball(`/competitions/${compId}/standings`);
+    let table = [];
+    if (st && st.standings) {
+      const s = st.standings.find(x => x.type === 'TOTAL') || st.standings[0];
+      table = s ? (s.table || []) : [];
     }
+    const strengths = estimateStrengthsFromTable(table);
+    // find team ids
+    const homeId = match.homeTeam && match.homeTeam.id;
+    const awayId = match.awayTeam && match.awayTeam.id;
+    const homeStr = strengths[homeId] || { attack:1, defense:1 };
+    const awayStr = strengths[awayId] || { attack:1, defense:1 };
+    // base league average goals per game (approx)
+    const avgGoals = 1.4;
+    const lambdaHome = avgGoals * homeStr.attack * (1/awayStr.defense) * 1.08; // home adv
+    const lambdaAway = avgGoals * awayStr.attack * (1/homeStr.defense);
+    // Monte Carlo
+    function samplePoisson(lambda) {
+      const L = Math.exp(-lambda);
+      let k = 0, p = 1;
+      while (p > L) {
+        k++; p *= Math.random();
+      }
+      return k-1;
+    }
+    function simulate(lambdaA, lambdaB, sims=3000) {
+      let a=0,b=0,d=0;
+      const scoreCounts = {};
+      for (let i=0;i<sims;i++) {
+        const ga = samplePoisson(lambdaA);
+        const gb = samplePoisson(lambdaB);
+        if (ga>gb) a++; else if (gb>ga) b++; else d++;
+        const key = `${ga}-${gb}`;
+        scoreCounts[key] = (scoreCounts[key]||0)+1;
+      }
+      const top = Object.entries(scoreCounts).sort((x,y)=>y[1]-x[1]).slice(0,6).map(([s,c])=>({score:s,prob:c/sims}));
+      return { pHome: a/sims, pDraw: d/sims, pAway: b/sims, topScores: top };
+    }
+    const sim = simulate(lambdaHome, lambdaAway, 3000);
+    return res.json({
+      model: { lambdaHome, lambdaAway, pHome: sim.pHome, pDraw: sim.pDraw, pAway: sim.pAway, topScores: sim.topScores },
+      used: { homeTeam: match.homeTeam, awayTeam: match.awayTeam, competition: match.competition }
+    });
+  } catch (err) {
+    console.error('prob err', err);
+    return res.status(err.status || 500).json({ error: String(err) });
   }
-
-  // If no odds, we return null for odds-based (frontend can handle)
-  const implied = odds ? oddsToImplied(odds) : null;
-
-  // Model-based using Elo->Poisson Monte Carlo (fast, low sims)
-  const rA = match.team_a_rating || 1500;
-  const rB = match.team_b_rating || 1500;
-  const homeAdv = match.home === 'A' ? 30 : 0;
-  const lambdas = expectedGoalsFromElo(rA, rB, homeAdv);
-  const sim = simulateMatch(lambdas.lambdaA, lambdas.lambdaB, 2000);
-
-  return res.json({
-    odds: odds, // raw odds if any (null otherwise)
-    impliedProbabilities: implied, // null if no odds
-    model: {
-      lambdaA: lambdas.lambdaA,
-      lambdaB: lambdas.lambdaB,
-      pA: sim.pA,
-      pDraw: sim.pDraw,
-      pB: sim.pB,
-      topScores: sim.topScores
-    }
-  });
-});
-
-// Predictions endpoints (minimal)
-app.post('/api/predictions', (req,res) => {
-  const { user, match_id, prediction } = req.body || {};
-  if(!match_id || !prediction) return res.status(400).json({ error: 'missing' });
-  PREDICTIONS.push({ user: user || 'anon', match_id, prediction, points: 0 });
-  return res.json({ ok: true });
-});
-
-app.get('/api/ranking', (req,res) => {
-  // naive ranking: count predictions per user (placeholder)
-  const scores = {};
-  PREDICTIONS.forEach(p => { scores[p.user] = (scores[p.user]||0) + (p.points||0); });
-  const arr = Object.entries(scores).map(([u,pts])=>({ user: u, points: pts })).sort((a,b)=>b.points-a.points);
-  return res.json(arr);
-});
-
-// Simple admin endpoint to create match (for the demo)
-app.post('/api/matches', (req,res) => {
-  const body = req.body || {};
-  const id = MATCHES.length ? Math.max(...MATCHES.map(m=>m.id))+1 : 1;
-  const m = {
-    id,
-    league: body.league || 'liga_mx',
-    team_a: body.team_a || 'Team A',
-    team_b: body.team_b || 'Team B',
-    match_date: body.match_date || new Date().toISOString(),
-    team_a_rating: body.team_a_rating || 1500,
-    team_b_rating: body.team_b_rating || 1500,
-    home: body.home || 'A'
-  };
-  MATCHES.push(m);
-  return res.json({ ok: true, match: m });
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, ()=> console.log('Quiniela backend listening on', PORT));
+app.listen(PORT, ()=> console.log('Quiniela backend (football-data) listening on', PORT));
